@@ -1,0 +1,19 @@
+[project]
+name = "fio_benchmark"
+version = "0.1.0"
+description = "fio auto test and export to excel tool."
+authors = [
+    {name = "Labib Yang", email = "com.hackerbs@gmail.com"},
+]
+dependencies = []
+requires-python = ">=3.14"
+readme = "README.md"
+license = {text = "GPL-3.0"}
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+
+[tool.pdm]
+distribution = true

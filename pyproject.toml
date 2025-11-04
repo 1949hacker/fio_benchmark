@@ -10,7 +10,7 @@ dependencies = [
     "pandas>=2.0.0",  # 2.0+为较新系列，兼容最新特性
     "openpyxl>=3.1.0"  # 3.1+为最新稳定系列，适配新版pandas
 ]
-requires-python = ">=3.12"  # 当前Python最新稳定版（3.14尚未发布，不切实际）
+requires-python = ">=3.11"  # 当前Python最新稳定版（3.14尚未发布，不切实际）
 readme = "README.md"
 license = {text = "GPL-3.0"}
 

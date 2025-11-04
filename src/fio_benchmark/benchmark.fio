@@ -14,11 +14,10 @@ group_reporting=1    ; 汇总所有 job 的统计信息
 directory=/mnt/test/ ; 测试目录路径，请根据实际情况修改
 size=10G
 ramp_time=5s         ; 5秒预热，使设备进入稳定状态
-create_serialize=1   ; 修正：按顺序创建测试文件
-unlink=1             ; 修正：Job 运行结束后删除文件
-
-; 顺序执行控制 - 确保测试依次进行
-stonewall           ; 每个 job 等待前一个 job 完成后再开始
+create_serialize=1   ; 串行创建文件（避免并行创建冲突）
+unlink=1             ; Job运行完删除自身文件
+create_on_open=1     ; 关键新增：不提前创建文件，仅在Job开始IO时创建
+stonewall=1          ; 强制Job按顺序执行（前一个结束才开始下一个）
 
 ; ============================================================================
 ; 顺序写测试场景 - bs=128k/1m, iodepth=1/8/16/32, numjobs=1/4/8

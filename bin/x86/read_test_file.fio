@@ -1,0 +1,24 @@
+; read_test_file.fio - 创建读取测试用文件（适配numjobs=8读取场景）
+; 作用：生成8个独立的10G测试文件，供后续顺序读/随机读测试使用
+; 执行命令：fio read_test_file.fio
+; 注意：执行前需确保 /mnt/test/ 目录存在且有写入权限（sudo mkdir -p /mnt/test && sudo chmod 777 /mnt/test）
+
+[global]
+ioengine=libaio                       ; 与读取测试保持一致，使用Linux原生异步I/O
+direct=1                              ; 绕过页面缓存，生成真实的磁盘数据（避免缓存文件导致读取测试失真）
+randrepeat=0                          ; 随机写场景有效，此处保留（不影响顺序写）
+group_reporting=1                     ; 汇总8个job的创建进度/结果，避免单job分散输出
+directory=/mnt/test/                  ; 测试文件存储目录（必须与读取测试的directory一致！）
+filename_format=testfile.$jobnum      ; 关键：按job编号命名文件（testfile.1 ~ testfile.8）
+                                      ; 与numjobs=8匹配，每个job生成1个独立文件，后续读取时可精准对应
+unlink=0                              ; 关键：保留创建的测试文件（默认fio写完成后会删除，需禁用）
+fallocate=none                        ; 禁用预分配（避免文件占用空间但未实际写入数据，导致读取测试“读空”）
+verify=0                              ; 禁用数据校验（加快文件创建速度，读取测试无需依赖校验）
+
+[create_file_for_read_test]
+description=为numjobs=8读取测试创建8个10G文件（1M块顺序写）
+rw=write                              ; 顺序写模式（生成连续数据，适配后续顺序读测试）
+bs=1m                                 ; 块大小1M（与你“1M回写缓存”基准匹配，也可根据读取测试需求调整）
+iodepth=1                             ; 单队列深度（文件创建无需高并发，稳定即可）
+numjobs=8                             ; 8个并发job，对应生成8个独立文件（与读取测试的numjobs一致）
+size=10G                              ; 每个文件10G，总数据量80G（确保覆盖RAID缓存+磁盘实际容量，避免缓存干扰）

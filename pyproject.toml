@@ -5,15 +5,18 @@ description = "fio auto test and export to excel tool."
 authors = [
     {name = "Labib Yang", email = "com.hackerbs@gmail.com"},
 ]
-dependencies = []
-requires-python = ">=3.14"
+# 依赖仅指定最低兼容版本，不限制上限（自动拉取最新版）
+dependencies = [
+    "pandas>=2.0.0",  # 2.0+为较新系列，兼容最新特性
+    "openpyxl>=3.1.0"  # 3.1+为最新稳定系列，适配新版pandas
+]
+requires-python = ">=3.11"  # 当前Python最新稳定版（3.14尚未发布，不切实际）
 readme = "README.md"
 license = {text = "GPL-3.0"}
 
 [build-system]
 requires = ["pdm-backend"]
 build-backend = "pdm.backend"
-
 
 [tool.pdm]
 distribution = true

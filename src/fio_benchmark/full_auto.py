@@ -248,27 +248,38 @@ def run_fio_test(run_index: int) -> str:
                 continue
 
             # DEBUG测试用
-            # line = "Jobs: 1 (f=1): [W(1),P(259)][0.8%][w=4740KiB/s][w=37 IOPS][eta 35m:00s]"
+            # line = "Jobs: 1 (f=1): [W(1),P(259)][0.3%][w=1550KiB/s][w=12 IOPS][eta 35m:00s]"
+            # line = "Jobs: 1(f=1): [_(1), R(1), P(1)][53.8 %][r = 543MiB / s][r = 4340IOPS][eta 00m: 49s]"
+            # line = "Jobs: 1 (f=1): [m(1)][25.7%][r=121MiB/s,w=51.8MiB/s][r=30.9k,w=13.3k IOPS][eta 00m:26s]"
 
             if "Jobs:" in line and "[" in line and "]":
-                # 提取读写模式（R=读，W=写，RW=混合）
-                rw_pattern = re.search(r"\[(R|W|RW)\(\d+\)", line)  # 修复这里
-                # 提取关键指标
-                progress_pattern = re.search(r"\[(\d+\.\d+)%\]", line)  # 修复小数点转义
-                bw_pattern = re.search(r"\[(r|w|rw)=(\d+KiB/s)\]", line)  # 修复这里，改为KiB/s
-                iops_pattern = re.search(r"\[(r|w|rw)=(\d+ IOPS)\]", line)  # 修复这里
-                eta_pattern = re.search(r"eta (\d+m:\d+s)", line)
+                # 提取读写模式（支持W写、R读、m混合，以及包含其他字符的情况）
+                rw_pattern = re.search(r"\[([^]]*)([WRm])\([^)]*\)", line)
+
+                # 提取进度百分比（支持空格和小数点）
+                progress_pattern = re.search(r"\[(\d+\.?\d*)\s*%\]", line)
+
+                # 提取带宽（支持r=, w=, 各种单位，以及可能的空格）
+                bw_pattern = re.search(r"\[(?:r|w)=(\d+\.?\d*\s*[KM]?i?B/s)\]", line)
+
+                # 提取IOPS（支持r=, w=, k单位，以及可能的空格）
+                iops_pattern = re.search(r"\[(?:r|w)=(\d+\.?\d*\s*[k]?\s*IOPS)\]", line)
+
+                # 提取剩余时间（支持空格）
+                eta_pattern = re.search(r"eta\s*(\d+m:\d+s)", line)
 
                 # 解析信息
-                rw_mode = rw_pattern.group(1) if rw_pattern else "未知"
+                rw_mode = rw_pattern.group(2) if rw_pattern else "未知"
                 progress = progress_pattern.group(1) if progress_pattern else "0.0"
-                bw = bw_pattern.group(2) if bw_pattern else "0MiB/s"  # 这里可以保持MiB/s
-                iops = iops_pattern.group(2) if iops_pattern else "0 IOPS"
+                bw = bw_pattern.group(1).strip() if bw_pattern else "0B/s"
+                iops = iops_pattern.group(1).strip() if iops_pattern else "0 IOPS"
                 eta = eta_pattern.group(1) if eta_pattern else "未知"
 
-                # 转换读写模式为中文
-                rw_cn = {"R": "读取", "W": "写入", "RW": "混合"}.get(rw_mode, rw_mode)
+                # 转换读写模式为中文（m转为混合）
+                rw_cn = {"R": "读取", "W": "写入", "m": "混合"}.get(rw_mode, "未知")
+
                 # 覆盖当前行更新进度
+                # print(f"\r进度: {progress:>6}% | 模式: {rw_cn:<6} | 带宽: {bw:<12} | IOPS: {iops:<10} | 剩余: {eta:<10}",end="", flush=True)
                 print(f"\r{progress:<8} {rw_cn:<10} {bw:<16} {iops:<12} {eta:<12}", end="", flush=True)
 
         # 检查返回码

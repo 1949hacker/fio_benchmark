@@ -104,7 +104,7 @@ def run_create_test_files():
     print(f"命令：{' '.join(command)}")
     print("📊 FIO进度")
     print("-" * 80)
-    print(f"{'进度 %':<6} {'读写模式':<8} {'写入带宽':<12} {'IOPS':<12} {'已运行时间':<12}")
+    print(f"{'进度 %':<6} {'读写模式':<8} {'写入带宽':<12} {'IOPS':<12} {'剩余时间':<12}")
     print("-" * 80)
 
     try:
@@ -228,7 +228,7 @@ def run_fio_test(run_index: int) -> str:
     print(f"命令：{' '.join(full_command)}")
     print("📊 FIO进度")
     print("-" * 80)
-    print(f"{'进度 %':<6} {'读写模式':<8} {'写入带宽':<12} {'IOPS':<12} {'已运行时间':<12}")
+    print(f"{'进度 %':<6} {'读写模式':<8} {'写入带宽':<12} {'IOPS':<12} {'剩余时间':<12}")
     print("-" * 80)
 
     try:
@@ -247,20 +247,22 @@ def run_fio_test(run_index: int) -> str:
             if not line:
                 continue
 
-            # 只处理包含进度信息的行
-            if "Jobs:" in line and "[" in line and "]" in line:
+            # DEBUG测试用
+            # line = "Jobs: 1 (f=1): [W(1),P(259)][0.8%][w=4740KiB/s][w=37 IOPS][eta 35m:00s]"
+
+            if "Jobs:" in line and "[" in line and "]":
                 # 提取读写模式（R=读，W=写，RW=混合）
-                rw_pattern = re.search(r"\[(R|W|RW)<span data-type='inline-math' data-value='XGQr'></span>\]", line)
+                rw_pattern = re.search(r"\[(R|W|RW)\(\d+\)", line)  # 修复这里
                 # 提取关键指标
-                progress_pattern = re.search(r"\[(\d+.\d+)%\]", line)
-                bw_pattern = re.search(r"(r|w|rw)=(\d+MiB/s)", line)
-                iops_pattern = re.search(r"(r|w|rw)=(\d+ IOPS)", line)
+                progress_pattern = re.search(r"\[(\d+\.\d+)%\]", line)  # 修复小数点转义
+                bw_pattern = re.search(r"\[(r|w|rw)=(\d+KiB/s)\]", line)  # 修复这里，改为KiB/s
+                iops_pattern = re.search(r"\[(r|w|rw)=(\d+ IOPS)\]", line)  # 修复这里
                 eta_pattern = re.search(r"eta (\d+m:\d+s)", line)
 
                 # 解析信息
                 rw_mode = rw_pattern.group(1) if rw_pattern else "未知"
                 progress = progress_pattern.group(1) if progress_pattern else "0.0"
-                bw = bw_pattern.group(2) if bw_pattern else "0MiB/s"
+                bw = bw_pattern.group(2) if bw_pattern else "0MiB/s"  # 这里可以保持MiB/s
                 iops = iops_pattern.group(2) if iops_pattern else "0 IOPS"
                 eta = eta_pattern.group(1) if eta_pattern else "未知"
 

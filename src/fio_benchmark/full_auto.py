@@ -3,6 +3,7 @@ import pandas as pd
 import subprocess
 import os
 import re
+import time
 from typing import List, Dict
 
 # -------------------------- 配置参数（根据需要修改）--------------------------
@@ -11,24 +12,159 @@ TEST_RUNS = 3  # 运行次数（固定3次）
 JSON_OUTPUT_PREFIX = "fio_results_run"  # 每次测试的JSON结果前缀（如fio_results_run1.json）
 FINAL_EXCEL_PATH = "fio测试结果_3次均值汇总.xlsx"  # 最终Excel输出路径
 FIO_COMMAND = ["fio", "--output-format=json"]  # FIO基础命令
+READ_TEST_FILE_CONFIG = "read_test_file.fio"  # 创建测试文件的FIO配置路径
+COUNTDOWN_SECONDS = 10  # 倒计时秒数（可修改）
 
 
-# -------------------------- 修复：解析FIO配置文件，返回完整参数 --------------------------
+# -------------------------- 新增：倒计时确认函数 --------------------------
+def countdown_confirm(prompt: str) -> bool:
+    """
+    倒计时确认函数：默认10秒后返回True（执行），期间按Ctrl+C取消返回False
+    :param prompt: 提示信息
+    :return: 是否执行（True=执行，False=取消）
+    """
+    print(f"\n{prompt}")
+    print(f"⌛ 倒计时 {COUNTDOWN_SECONDS} 秒后自动开始（按 Ctrl+C 取消）...")
+    try:
+        for i in range(COUNTDOWN_SECONDS, 0, -1):
+            print(f"\r剩余 {i} 秒...", end="", flush=True)
+            time.sleep(1)
+        print("\r倒计时结束，开始执行！")
+        return True
+    except KeyboardInterrupt:
+        print("\n\n🛑 用户取消操作")
+        return False
+
+
+# -------------------------- 新增：解析读取测试文件配置 --------------------------
+def parse_read_test_config() -> tuple[str, str, int]:
+    """
+    解析read_test_file.fio配置，获取:
+    - 目标目录(directory)
+    - 文件大小(size)
+    - 并发文件数(numjobs)
+    """
+    if not os.path.exists(READ_TEST_FILE_CONFIG):
+        raise FileNotFoundError(f"读取测试配置文件不存在：{READ_TEST_FILE_CONFIG}")
+
+    # 正则表达式匹配所需参数
+    dir_pattern = re.compile(r"directory\s*=\s*(\S+)", re.IGNORECASE)
+    size_pattern = re.compile(r"size\s*=\s*(\S+)", re.IGNORECASE)
+    numjobs_pattern = re.compile(r"numjobs\s*=\s*(\d+)", re.IGNORECASE)
+
+    directory = "."  # 默认当前目录
+    size = "1G"       # 默认大小
+    numjobs = 1       # 默认文件数
+
+    with open(READ_TEST_FILE_CONFIG, "r", encoding="utf-8") as f:
+        content = f.read()
+
+        # 提取目录
+        dir_match = dir_pattern.search(content)
+        if dir_match:
+            directory = dir_match.group(1).strip()
+
+        # 提取文件大小
+        size_match = size_pattern.search(content)
+        if size_match:
+            size = size_match.group(1).strip()
+
+        # 提取文件数量
+        numjobs_match = numjobs_pattern.search(content)
+        if numjobs_match:
+            numjobs = int(numjobs_match.group(1).strip())
+
+    # 验证目录是否存在
+    if not os.path.exists(directory):
+        os.makedirs(directory, exist_ok=True)
+        print(f"⚠️  目录不存在，已自动创建：{directory}")
+
+    return directory, size, numjobs
+
+
+# -------------------------- 修复：运行测试文件创建（单位置更新，不刷屏）--------------------------
+def run_create_test_files():
+    """运行read_test_file.fio创建测试文件（单位置更新进度，避免刷屏）"""
+    print("\n📂 开始解析测试文件配置...")
+    directory, size, numjobs = parse_read_test_config()
+
+    # 显示创建信息
+    print(f"✅ 测试文件配置解析完成：")
+    print(f"   - 目标路径：{directory}")
+    print(f"   - 文件大小：{size}")
+    print(f"   - 文件数量：{numjobs}个（testfile.0 ~ testfile.{numjobs-1}）")
+
+    # 倒计时确认
+    if not countdown_confirm("❓ 是否创建这些测试文件？"):
+        return
+
+    # 构建命令：添加 --eta=always（强制显示进度）+ --group_reporting（简化输出）
+    command = ["fio", "--eta=always", "--group_reporting", READ_TEST_FILE_CONFIG]
+    print(f"\n📌 开始创建测试文件...")
+    print(f"命令：{' '.join(command)}")
+    print("📊 FIO进度")
+    print("-" * 80)
+    print(f"{'进度 %':<6} {'读写模式':<8} {'写入带宽':<12} {'IOPS':<12} {'已运行时间':<12}")
+    print("-" * 80)
+
+    try:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            encoding="utf-8",
+            bufsize=1,
+            text=True
+        )
+
+        # 实时读取输出，只提取进度行并覆盖更新
+        while process.poll() is None:
+            line = process.stdout.readline()
+            if not line:
+                continue
+
+            # 只处理包含进度信息的行（匹配 "Jobs: " 且包含 "[W(8)]" 或类似模式）
+            if "Jobs:" in line and "[" in line and "]" in line:
+                # 用正则提取关键信息：进度百分比、带宽、IOPS、剩余时间
+                progress_pattern = re.search(r"\[(\d+.\d+)%\]", line)
+                bw_pattern = re.search(r"w=(\d+MiB/s)", line)
+                iops_pattern = re.search(r"w=(\d+ IOPS)", line)
+                eta_pattern = re.search(r"eta (\d+m:\d+s)", line)
+
+                # 提取信息（无匹配则显示默认值）
+                progress = progress_pattern.group(1) if progress_pattern else "0.0"
+                bw = bw_pattern.group(1) if bw_pattern else "0MiB/s"
+                iops = iops_pattern.group(1) if iops_pattern else "0 IOPS"
+                eta = eta_pattern.group(1) if eta_pattern else "未知"
+
+                # 用 \r 覆盖当前行，end="" 不换行，flush=True 强制刷新
+                print(f"\r{progress:<8} {'写入':<10} {bw:<16} {iops:<12} {eta:<12}", end="", flush=True)
+
+        # 检查返回码
+        returncode = process.wait()
+        if returncode != 0:
+            raise subprocess.CalledProcessError(returncode, command)
+
+        # 进度更新完成后，换行并打印结果
+        print("\n" + "-" * 80)
+        print(f"✅ 测试文件创建完成，路径：{directory}")
+    except subprocess.CalledProcessError as e:
+        print("\n" + "-" * 80)
+        print(f"❌ 测试文件创建失败！")
+        raise
+    except Exception as e:
+        print("\n" + "-" * 80)
+        print(f"❌ 执行异常：{str(e)}")
+        raise
+
+
+# -------------------------- 原有解析FIO配置文件函数 --------------------------
 def parse_fio_config() -> tuple[int, int, int, int]:
-    """
-    解析FIO配置文件，获取：
-    1. runtime（测试时长，单位：秒）
-    2. ramp_time（预热时长，单位：秒）
-    3. 单个Job的总耗时（runtime + ramp_time，单位：秒）
-    4. 要运行的Job数量（排除注释、全局配置）
-    :return: (runtime, ramp_time, single_job_duration, job_count)
-    """
+    """原有函数保持不变"""
     if not os.path.exists(FIO_CONFIG_PATH):
         raise FileNotFoundError(f"FIO配置文件不存在：{FIO_CONFIG_PATH}")
 
-    # 正则表达式：匹配 runtime 和 ramp_time（支持带单位s/m/h，默认s）
     time_pattern = re.compile(r"(runtime|ramp_time)\s*=\s*(\d+)([smh]?)", re.IGNORECASE)
-    # 正则表达式：匹配Job块（[job_name] 格式，排除[global]）
     job_pattern = re.compile(r"^\s*\[(?!global)\w+", re.MULTILINE)
 
     runtime = 0
@@ -38,11 +174,9 @@ def parse_fio_config() -> tuple[int, int, int, int]:
     with open(FIO_CONFIG_PATH, "r", encoding="utf-8") as f:
         content = f.read()
 
-        # 1. 提取 runtime 和 ramp_time
         matches = time_pattern.findall(content)
         for key, value, unit in matches:
             value = int(value)
-            # 转换为秒（默认s，m=60s，h=3600s）
             if unit.lower() == "m":
                 value *= 60
             elif unit.lower() == "h":
@@ -53,16 +187,14 @@ def parse_fio_config() -> tuple[int, int, int, int]:
             elif key.lower() == "ramp_time":
                 ramp_time = value
 
-        # 2. 统计Job数量（匹配[job_name]格式，排除[global]）
         jobs = job_pattern.findall(content)
         job_count = len(jobs)
 
-    # 校验参数（避免配置文件中未设置runtime/ramp_time）
     if runtime == 0:
-        runtime = 30  # 默认30秒（若配置文件未设置）
+        runtime = 30
         print(f"⚠️  未在配置文件中找到runtime，使用默认值：{runtime}s")
     if ramp_time == 0:
-        ramp_time = 5  # 默认5秒（若配置文件未设置）
+        ramp_time = 5
         print(f"⚠️  未在配置文件中找到ramp_time，使用默认值：{ramp_time}s")
     if job_count == 0:
         raise ValueError("❌ 未在配置文件中找到任何Job（格式应为[job_name]）")
@@ -71,14 +203,8 @@ def parse_fio_config() -> tuple[int, int, int, int]:
     return runtime, ramp_time, single_job_duration, job_count
 
 
+# -------------------------- 原有其他函数保持不变 --------------------------
 def calculate_total_estimated_time(single_job_duration: int, job_count: int, test_runs: int) -> str:
-    """
-    计算总预估时长，转换为「小时:分钟:秒」格式
-    :param single_job_duration: 单个Job耗时（秒）
-    :param job_count: Job数量
-    :param test_runs: 测试次数
-    :return: 格式化的总预估时长字符串
-    """
     total_seconds = single_job_duration * job_count * test_runs
     hours = total_seconds // 3600
     minutes = (total_seconds % 3600) // 60
@@ -92,33 +218,77 @@ def calculate_total_estimated_time(single_job_duration: int, job_count: int, tes
         return f"{seconds}秒"
 
 
-# -------------------------- 原有核心函数（保持不变）--------------------------
+# -------------------------- 修复：run_fio_test（单位置更新，不刷屏）--------------------------
 def run_fio_test(run_index: int) -> str:
-    """执行单次FIO测试，返回JSON结果文件路径"""
     json_path = f"{JSON_OUTPUT_PREFIX}{run_index}.json"
-    full_command = FIO_COMMAND + ["--output", json_path, FIO_CONFIG_PATH]
+    # 命令：--eta=always（进度）+ --group_reporting（简化输出）+ 保留JSON输出
+    full_command = FIO_COMMAND + ["--eta=always", "--group_reporting", "--output", json_path, FIO_CONFIG_PATH]
 
     print(f"\n📌 开始第{run_index}次FIO测试...")
     print(f"命令：{' '.join(full_command)}")
+    print("📊 FIO进度")
+    print("-" * 80)
+    print(f"{'进度 %':<6} {'读写模式':<8} {'写入带宽':<12} {'IOPS':<12} {'已运行时间':<12}")
+    print("-" * 80)
 
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             full_command,
-            check=True,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            encoding="utf-8"
+            stderr=subprocess.STDOUT,
+            encoding="utf-8",
+            bufsize=1,
+            text=True
         )
+
+        # 实时读取输出，只提取进度行并覆盖更新
+        while process.poll() is None:
+            line = process.stdout.readline()
+            if not line:
+                continue
+
+            # 只处理包含进度信息的行
+            if "Jobs:" in line and "[" in line and "]" in line:
+                # 提取读写模式（R=读，W=写，RW=混合）
+                rw_pattern = re.search(r"\[(R|W|RW)<span data-type='inline-math' data-value='XGQr'></span>\]", line)
+                # 提取关键指标
+                progress_pattern = re.search(r"\[(\d+.\d+)%\]", line)
+                bw_pattern = re.search(r"(r|w|rw)=(\d+MiB/s)", line)
+                iops_pattern = re.search(r"(r|w|rw)=(\d+ IOPS)", line)
+                eta_pattern = re.search(r"eta (\d+m:\d+s)", line)
+
+                # 解析信息
+                rw_mode = rw_pattern.group(1) if rw_pattern else "未知"
+                progress = progress_pattern.group(1) if progress_pattern else "0.0"
+                bw = bw_pattern.group(2) if bw_pattern else "0MiB/s"
+                iops = iops_pattern.group(2) if iops_pattern else "0 IOPS"
+                eta = eta_pattern.group(1) if eta_pattern else "未知"
+
+                # 转换读写模式为中文
+                rw_cn = {"R": "读取", "W": "写入", "RW": "混合"}.get(rw_mode, rw_mode)
+                # 覆盖当前行更新进度
+                print(f"\r{progress:<8} {rw_cn:<10} {bw:<16} {iops:<12} {eta:<12}", end="", flush=True)
+
+        # 检查返回码
+        returncode = process.wait()
+        if returncode != 0:
+            raise subprocess.CalledProcessError(returncode, full_command)
+
+        # 完成后换行
+        print("\n" + "-" * 80)
         print(f"✅ 第{run_index}次测试完成，结果文件：{json_path}")
         return json_path
     except subprocess.CalledProcessError as e:
+        print("\n" + "-" * 80)
         print(f"❌ 第{run_index}次测试失败！")
-        print(f"错误输出：{e.stderr}")
+        raise
+    except Exception as e:
+        print("\n" + "-" * 80)
+        print(f"❌ 执行异常：{str(e)}")
         raise
 
 
 def extract_fio_metrics(json_path: str) -> List[Dict]:
-    """从单个JSON文件提取指标（复用原有逻辑）"""
     with open(json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
@@ -161,7 +331,6 @@ def extract_fio_metrics(json_path: str) -> List[Dict]:
 
 
 def calculate_mean_metrics(all_runs_data: List[List[Dict]]) -> pd.DataFrame:
-    """计算3次测试的均值"""
     combined_data = []
     for run_idx, run_data in enumerate(all_runs_data, 1):
         for job_data in run_data:
@@ -184,7 +353,6 @@ def generate_final_excel(
         df_mean: pd.DataFrame,
         excel_path: str
 ):
-    """生成最终Excel（4个工作表）"""
     column_order = [
         "groupid", "测试名称", "测试描述", "读写模式", "块大小", "IO队列深度", "并发job数",
         "读取量(MB)", "写入量(MB)",
@@ -194,11 +362,9 @@ def generate_final_excel(
     ]
 
     with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
-        # 1. 均值汇总（第一个工作表）
         df_mean = df_mean[column_order]
         df_mean.to_excel(writer, sheet_name="均值汇总", index=False)
 
-        # 2. 3次原始数据
         for run_idx, run_data in enumerate(all_runs_data, 1):
             sheet_name = f"第{run_idx}次"
             df_run = pd.DataFrame(run_data)[column_order]
@@ -209,48 +375,51 @@ def generate_final_excel(
             worksheet = writer.sheets[sheet_name]
             for column in worksheet.columns:
                 max_length = max(len(str(cell.value)) if cell.value else 0 for cell in column)
-                adjusted_width = min(max_length + 3, 25)
+                adjusted_width = min(max_length + 3, 25)  # 最大宽度限制为25
                 worksheet.column_dimensions[column[0].column_letter].width = adjusted_width
 
     print(f"\n🎉 最终Excel文件已生成：{excel_path}")
     print(f"📋 包含工作表：均值汇总、第1次、第2次、第3次")
 
 
-# -------------------------- 主流程（修复变量作用域）--------------------------
+# -------------------------- 主流程（完整无截断）--------------------------
 def main():
     print("=" * 60)
     print("🚀 开始FIO测试自动化流程（3次运行+均值汇总）")
+    print(f"测试文件配置：{READ_TEST_FILE_CONFIG}")
     print(f"FIO配置文件：{FIO_CONFIG_PATH}")
     print(f"最终Excel输出：{FINAL_EXCEL_PATH}")
     print("=" * 60)
 
     try:
-        # 修复：获取 runtime 和 ramp_time 变量（从函数返回值中提取）
+        # 步骤1：运行测试文件创建（单位置更新）
+        run_create_test_files()
+
+        # 步骤2：解析FIO配置并倒计时确认测试
         print("\n📊 正在解析FIO配置文件，计算预估测试时长...")
         runtime, ramp_time, single_job_duration, job_count = parse_fio_config()
         total_estimated_time = calculate_total_estimated_time(
             single_job_duration, job_count, TEST_RUNS
         )
 
-        # 打印时长预估信息（现在变量可正常访问）
         print(f"✅ 配置解析完成：")
         print(f"   - 单个Job耗时：{single_job_duration}秒（runtime={runtime}s + ramp_time={ramp_time}s）")
         print(f"   - 总Job数量：{job_count}个")
         print(f"   - 测试次数：{TEST_RUNS}次")
         print(f"   - 总预估时长：{total_estimated_time}（实际时长可能因系统负载略有差异）")
 
-        # 确认是否继续
-        confirm = input("\n❓ 是否继续执行测试？(y/n，默认y) ").lower()
-        if confirm != "y" and confirm != "":
+        # 倒计时确认开始测试
+        if not countdown_confirm("❓ 是否继续执行FIO测试？"):
             print("🛑 测试已取消")
             return
 
-        # 原有步骤：执行测试、提取数据、计算均值、生成Excel
+        # 步骤3：执行多次FIO测试（单位置更新）
         json_paths = []
         for run_idx in range(1, TEST_RUNS + 1):
             json_path = run_fio_test(run_idx)
             json_paths.append(json_path)
 
+        # 步骤4：提取指标、计算均值、生成Excel
         all_runs_data = []
         for json_path in json_paths:
             run_data = extract_fio_metrics(json_path)
@@ -262,7 +431,7 @@ def main():
 
         generate_final_excel(all_runs_data, df_mean, FINAL_EXCEL_PATH)
 
-        # 可选：删除中间JSON文件
+        # 步骤5：删除中间文件（保留手动确认）
         if input("\n❓ 是否删除中间JSON结果文件？(y/n，默认n) ").lower() == "y":
             for json_path in json_paths:
                 os.remove(json_path)

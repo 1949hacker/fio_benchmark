@@ -1,5 +1,8 @@
 # fio_benchmark
 
+使用Debian 13 Python 3.13.5
+使用pyinstaller+staticx进行编译打包的
+
 ## 更新日志
 
 ### v1.1
@@ -40,3 +43,14 @@ Fixes: 读取测试IOPS过高但无读取数据量Bytes记录
 > parted /dev/sdX, mklabel gpt, mkpart start 从2048s扇区开始到100%
 > 测试改为使用全自动测试工具，含自动输出为表格
 > 测试数据规范：带宽单位统一MB/s，IOPS统一为IOPS（不采用kIOPS，方便统计图图形化显示），延迟统一为ms毫秒。带小数点的只取2位
+
+## 编译规范
+
+```shell
+python3 -m venv .venv
+source ./venv/bin/active
+pip -V
+pip install -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple pandas openpyxl nuitka
+nuitka --standalone --onefile --output-dir=bin full_auto.py
+# 最终输出在dist/full_auto.v1.2.1
+```

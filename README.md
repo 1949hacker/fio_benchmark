@@ -1,9 +1,12 @@
 # fio_benchmark
 
-使用Debian 13 Python 3.13.5
-使用pyinstaller+staticx进行编译打包的
+装好`fio`把`/bin/Linux/x86/`里的三个文件下载到同一个目录，然后运行`./full_auto.v2.0.0`即可，完全自动
 
 ## 更新日志
+
+### v2.0.0
+
+毁灭吧破python，换golang了，`/bin/Linux/x86/full_auto.v2.0.0`直接运行，当然，你得先装好`fio`
 
 ### v1.1
 

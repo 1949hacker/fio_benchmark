@@ -205,7 +205,8 @@ func parseFIOConfig() (runtime, rampTime, singleJobDuration, jobCount int, err e
 	}
 
 	timePattern := regexp.MustCompile(`(?i)(runtime|ramp_time)\s*=\s*(\d+)([smh]?)`)
-	jobPattern := regexp.MustCompile(`(?m)^\s*\[(?!global)\w+`)
+	// 移除负向预查语法，使用后续过滤方式
+	jobPattern := regexp.MustCompile(`(?m)^\s*\[\w+`)
 
 	runtime = 0
 	rampTime = 0
@@ -243,8 +244,16 @@ func parseFIOConfig() (runtime, rampTime, singleJobDuration, jobCount int, err e
 		fmt.Printf("⚠️  未在配置文件中找到ramp_time，使用默认值：%ds\n", rampTime)
 	}
 
+	// 先匹配所有可能的job，再过滤掉global
 	jobs := jobPattern.FindAllString(string(content), -1)
-	jobCount = len(jobs)
+	filteredJobs := []string{}
+	for _, job := range jobs {
+		// 过滤掉[global开头的配置项
+		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(job)), "[global") {
+			filteredJobs = append(filteredJobs, job)
+		}
+	}
+	jobCount = len(filteredJobs)
 	if jobCount == 0 {
 		return 0, 0, 0, 0, fmt.Errorf("❌ 未在配置文件中找到任何Job（格式应为[job_name]）")
 	}

@@ -50,10 +50,7 @@ Fixes: 读取测试IOPS过高但无读取数据量Bytes记录
 ## 编译规范
 
 ```shell
-python3 -m venv .venv
-source ./venv/bin/active
-pip -V
-pip install -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple pandas openpyxl nuitka
-nuitka --standalone --onefile --output-dir=bin full_auto.py
-# 最终输出在dist/full_auto.v1.2.1
+set GOOS=linux
+set GOARCH=amd64
+go build -o full_auto.v2.1.0 full_auto.go
 ```
